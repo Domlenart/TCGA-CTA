@@ -1,4 +1,4 @@
-import fbget
+from firebrowse import fbget
 import csv
 from multiprocessing.dummy import Pool as ThreadPool
 
@@ -11,7 +11,7 @@ list_of_genes = [x.strip() for x in list_of_genes]
 print list_of_genes
 
 
-# splits the gene file into parts to feed into fbget (because otherwise it timeouts on too many genes requested from DB)
+# splits the gene file into parts to feed into fbget (otherwise it timeouts on too many genes requested from DB)
 def chunk(seq, size):
 
     return (seq[pos:pos + size] for pos in xrange(0, len(seq), size))
@@ -20,21 +20,26 @@ def chunk(seq, size):
 # gets gene log2 data in float format for the current patient for all genes
 def get_genes_data(patient_barcode):
 
-    high_exp = 0    # stores how many genes are expressed more that in control
+    high_exp = 0    # stores how many genes are expressed more than in control
 
     for part in chunk(list_of_genes, 15):
+        try:
+            reader = csv.DictReader(open(patient_barcode), delimiter='\t')
+            for row in reader:
+                if row['expression_log2'] != "None" and float(row['expression_log2']) >= 1.5:
+                    high_exp += 1
 
-        gene_data = fbget.mrnaseq(format="tsv", gene=part, barcode=patient_barcode, sample_type='TP')    # getting genetic data
+        except:
+            gene_data = fbget.mrnaseq(format="tsv", gene=part, barcode=patient_barcode, sample_type='TP') # get genetic data
+            gene_file = open(patient_barcode, 'w')
+            gene_file.write(gene_data)
+            gene_file.close()
 
-        gene_file = open(patient_barcode, 'w')                                              # making and opening a file
-        gene_file.write(gene_data)                                                          # writing data to a file
-        gene_file.close()                                                                   # closing file
+            reader = csv.DictReader(open(patient_barcode), delimiter='\t')            # opens the file and reads header
 
-        reader = csv.DictReader(open(patient_barcode), delimiter='\t')            # opens the file and reads header
-
-        for row in reader:
-            if row['expression_log2'] != "None" and float(row['expression_log2']) > 1.5:
-                high_exp += 1
+            for row in reader:
+                if row['expression_log2'] != "None" and float(row['expression_log2']) >= 1.5:
+                    high_exp += 1
 
     print patient_barcode + '\t' + str(high_exp)
     return high_exp
@@ -64,8 +69,7 @@ def clinical_checker(cohort=""):                             # gets patient data
             print patient_id + '\t' + last_followup
             list_of_patients.append(patient_id)
 
-    print "_______________________________"
-
+    print "_"*20
     pool = ThreadPool(8)
     results = pool.map(get_genes_data, list_of_patients)
     pool.close()
