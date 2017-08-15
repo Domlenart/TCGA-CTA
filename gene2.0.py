@@ -8,7 +8,7 @@ with open('pure-sequestered-cta') as f:
     list_of_genes = f.readlines()
 
 list_of_genes = [x.strip() for x in list_of_genes]
-print list_of_genes
+for i in list_of_genes: print i
 
 
 # splits the gene file into parts to feed into fbget (otherwise it timeouts on too many genes requested from DB)
@@ -41,7 +41,7 @@ def get_genes_data(patient_barcode):
                 if row['expression_log2'] != "None" and float(row['expression_log2']) >= 1.5:
                     high_exp += 1
 
-    print patient_barcode + '\t' + str(high_exp)
+    print patient_barcode + '\t' + str(high_exp) + '\n'
     return high_exp
 
 
@@ -54,7 +54,6 @@ def clinical_checker(cohort=""):                             # gets patient data
     reader = csv.DictReader(open(cohort), delimiter='\t')  # opens the file in read mode
     list_of_patients = []
     list_of_deaths = []
-    list_of_ongoing = []
 
     for row in reader:
         if row['days_to_death'] != "NA" and row['gender'] == 'female':
