@@ -1,7 +1,9 @@
 import os
 from firebrowse import fbget
-import lifelines
 import pickle
+import pandas as pd
+from pandas import DataFrame
+import lifelines
 
 CD = os.path.dirname(os.path.abspath(__file__))
 SEQUESTERED_GENES = [i.rstrip() for i in open('pure-sequestered-cta')]
@@ -90,7 +92,6 @@ def check_mRNASeq_data(cohort):
             break
     print 'No problems with mRNASeq in ' + str(cohort)
 
-
 def merge_clinical_with_mrna(cohort):
 
     ''' Order of data:
@@ -148,7 +149,7 @@ def merge_clinical_with_mrna(cohort):
                     relevant_data[id].append(z_score)
 
                 else:
-                    relevant_data[id].append(['Not found'])
+                    relevant_data[id].append('Not found')
                     z_score = line[gene_data_z_score_pos]
                     id += 1
                     relevant_data[id].append(z_score)
@@ -157,10 +158,24 @@ def merge_clinical_with_mrna(cohort):
 
         with open(str('merged_data_' + cohort), 'wb') as fp:
             pickle.dump(relevant_data, fp)
-
+    else:
         with open(str('merged_data_' + cohort), 'rb') as fp:
-            itemlist = pickle.load(fp)
+            DATA = pickle.load(fp)
 
+        for i in DATA:
+            print i
+        return DATA
+print '\n'
+
+
+
+def kaplan_meier_plot_and_stat(data):
+    header = data[0]
+    data = data[1:]
+    pandas_data = DataFrame(data=data, columns=header)
+    print pandas_data
+
+    fitter = lifelines.KaplanMeierFitter()
 
 def process_data(cohort):
     get_clinical_data(cohort)
@@ -168,4 +183,6 @@ def process_data(cohort):
     check_mRNASeq_data(cohort)
 
 
-merge_clinical_with_mrna('BRCA')
+
+x = merge_clinical_with_mrna('BRCA')
+kaplan_meier_plot_and_stat(x)
