@@ -1,9 +1,11 @@
 import os
 from firebrowse import fbget
 import pickle
-import pandas as pd
+
 from pandas import DataFrame
+import pandas as pd
 import lifelines
+from matplotlib import pyplot as plt
 
 CD = os.path.dirname(os.path.abspath(__file__))
 SEQUESTERED_GENES = [i.rstrip() for i in open('pure-sequestered-cta')]
@@ -96,7 +98,7 @@ def merge_clinical_with_mrna(cohort):
 
     ''' Order of data:
     1. Barcode
-    2. Vital status
+    2. Death status (1 = dead, 0 = alive)
     3. Days to death (NA if alive)
     4. Days to last followup (NA if dead) '''
 
@@ -114,19 +116,29 @@ def merge_clinical_with_mrna(cohort):
 
         clinical_data = [line.rstrip().split('\t') for line in clinical_data]
         relevant_data = []
-        clinical_relevant_data_header = ['tcga_participant_barcode', 'vital_status', 'days_to_death',
-                                         'days_to_last_followup']
+        clinical_relevant_data_header = ['tcga_participant_barcode', 'death_status', 'days_to_death',
+                                         'days_to_last_followup', 'time_alive']
         relevant_data.append(clinical_relevant_data_header)
 
+        # Extracting clinical data
         for sample in clinical_data:
             barcode, vital, to_death, last_followup = sample[clinical_header_barcode_pos], sample[clinical_vital_pos], \
                                                       sample[clinical_to_death_pos], sample[clinical_last_followup]
-            lst = [barcode, vital, to_death, last_followup]
+            if vital == 'alive':
+                time_alive = last_followup
+                vital = 0
+
+            else:
+                time_alive = to_death
+                vital = 1
+
+            lst = [barcode, vital, to_death, last_followup, time_alive]
 
             relevant_data.append(lst)
 
         os.chdir(str(CD + '/' + cohort + '/Gene_data_RAW'))
 
+        # Extracting gene data
         for gene in SEQUESTERED_GENES:
             relevant_data[0].append(gene)
 
@@ -156,26 +168,44 @@ def merge_clinical_with_mrna(cohort):
 
         os.chdir(str(CD + '/' + cohort))
 
+        # Removing patients that have wrong survival data from file
+        for i in relevant_data:
+            if i == relevant_data[0]:
+                pass
+            else:
+                if i[4] == 'NA' or int(i[4]) < 0:
+                    relevant_data.pop(relevant_data.index(i))
+                    print "Removed entry"
+
+        # Dumping a list with relevant data to file
         with open(str('merged_data_' + cohort), 'wb') as fp:
             pickle.dump(relevant_data, fp)
+
+        return 0
     else:
         with open(str('merged_data_' + cohort), 'rb') as fp:
             DATA = pickle.load(fp)
 
-        for i in DATA:
-            print i
         return DATA
-print '\n'
-
 
 
 def kaplan_meier_plot_and_stat(data):
+
+    for i in data:
+        print i
+
     header = data[0]
     data = data[1:]
     pandas_data = DataFrame(data=data, columns=header)
-    print pandas_data
 
+    # Need to convert pd data series to numeric, because it is incorrectly recognized as object.
+    kaplan_meier_time = pd.to_numeric(pandas_data['time_alive'])
+    kaplan_meier_event = pandas_data['death_status']
     fitter = lifelines.KaplanMeierFitter()
+    fitter.fit(kaplan_meier_time, event_observed=kaplan_meier_event)
+    fitter.plot()
+    plt.show()
+
 
 def process_data(cohort):
     get_clinical_data(cohort)
@@ -185,4 +215,5 @@ def process_data(cohort):
 
 
 x = merge_clinical_with_mrna('BRCA')
+
 kaplan_meier_plot_and_stat(x)
