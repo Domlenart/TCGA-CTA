@@ -6,6 +6,7 @@ import pandas as pd
 import lifelines
 from matplotlib import pyplot as plt
 import numpy
+from math import sqrt, ceil
 
 CD = os.path.dirname(os.path.abspath(__file__))
 SEQUESTERED_GENES = [i.rstrip() for i in open('pure-sequestered-cta')]
@@ -16,6 +17,22 @@ LIST_OF_CANCERS = ['ACC', 'BLCA', 'BRCA', 'CESC', 'CHOL', 'COAD', 'COADREAD', 'D
 print 'List of cancers that will be analyzed: ' + str(LIST_OF_CANCERS)
 print 'List of genes to be analyzed: ' + str(SEQUESTERED_GENES)
 print 'Current script working directory: ' + str(CD)
+
+
+def find_two_closest_integers(X):
+    N = ceil(sqrt(X))
+    M = 0
+    while True:
+        if (X % N) == 0:
+            M = X/N
+            break
+        else:
+            N+=1
+
+    result = []
+    result.append(N)
+    result.append(M)
+    return result
 
 
 def get_clinical_data(cohort):
@@ -264,7 +281,11 @@ def label_genes_with_quartiles(cohort):
     # Need to remove empty elements from the header
     NEW_DATA_LIST[0] = NEW_DATA_LIST[0][:94]
 
-    print 'Changes in expression in: ' + str(genes_with_varying_expression)
+    print 'Changes in expression in: ' + str(len(genes_with_varying_expression)) + str(genes_with_varying_expression)
+
+    with open('Genes_with_changed_expression', 'wb') as f:
+        pickle.dump(genes_with_varying_expression, f)
+
     print 'No change in expression in: ' + str(genes_with_no_changes_in_expression)
 
     # Time to remove data for genes that do not change their expression
@@ -294,15 +315,15 @@ def label_genes_with_quartiles(cohort):
         pickle.dump(NEW_DATA_LIST, fp)
 
 
-
 def kaplan_meier_plot_and_stat(cohort):
 
     os.chdir(str(CD + '/' + cohort))
-
     with open(str('merged_data_with_quartiles_' + cohort), 'rb') as fp:
         data = pickle.load(fp)
+    with open('Genes_with_changed_expression', 'rb') as f:
+        changed_expression = pickle.load(f)
 
-    # Loading as pandas DataFrame, 1st row will be header
+    # Loading patient/gene data as pandas DataFrame, 1st row will be header
     header = data[0]
     data = data[1:]
     pandas_data = DataFrame(data=data, columns=header, dtype=float)
@@ -314,41 +335,51 @@ def kaplan_meier_plot_and_stat(cohort):
     test_data = pd.to_numeric(group['time_alive'])
     '''
 
-    def run_survival(data, gene_name):
+    def run_survival(data, gene_name, number_of_plots, plot_id):
+        plot_size = find_two_closest_integers(int(number_of_plots))
+        plot_id = plot_id+1
+        ax = plt.subplot(int(plot_size[0]), int(plot_size[1]), plot_id)
+        ax.set_title(gene_name)
+
         gene = gene_name + ' Quartile'
         gene = ''.join(gene)
         genders = ['male', 'female']
         print 'Running survival plot for ' + str(gene)
         group_by = ['gender']
         group_by.append(gene)
-        print group_by
+        # print group_by
         gene_groups = ['Median', 'Third_quartile', 'Between_50_and_75']
 
-        ax = plt.subplot(111)
         kmf = lifelines.KaplanMeierFitter()
 
         grouped_data = data.groupby(group_by)
 
         for gene_group in gene_groups:
             for gender in genders:
-                pre_tuple_list = [gender, gene_group]
-                groups = tuple(pre_tuple_list)
-                print 'tuple: ' + str(groups)
-                d = grouped_data.get_group(groups)
+                try:
+                    pre_tuple_list = [gender, gene_group]
+                    groups = tuple(pre_tuple_list)
+                    # print 'tuple: ' + str(groups)
+                    d = grouped_data.get_group(groups)
 
-                kaplan_meier_time = pd.to_numeric(d['time_alive'])
-                kaplan_meier_event = d['death_status']
+                    kaplan_meier_time = pd.to_numeric(d['time_alive'])
+                    kaplan_meier_event = d['death_status']
 
-                kmf.fit(kaplan_meier_time, kaplan_meier_event, label=groups)
+                    kmf.fit(kaplan_meier_time, kaplan_meier_event, label=groups)
 
-                kmf.plot(ax=ax)
+                    kmf.plot(ax=ax)
+                except KeyError:
+                    # print "No " + str(gender) + ' in gene' + str(gene_group)
+                    pass
 
-        plt.show()
 
-        return ax
+    for id, gene in enumerate(changed_expression):
+        gene = str(gene)
+        numb_of_plots = len(changed_expression)
+        run_survival(pandas_data, gene, numb_of_plots,id)
 
+    plt.show()
 
-    run_survival(pandas_data, 'Wdr65')
 
 def process_data(cohort):
     get_clinical_data(cohort)
@@ -361,3 +392,4 @@ merge_clinical_with_mrna('BRCA')
 label_genes_with_quartiles('BRCA')
 
 kaplan_meier_plot_and_stat('BRCA')
+
