@@ -99,11 +99,12 @@ def merge_clinical_with_mrna(cohort):
 
     ''' Order of data:
     0. Barcode
-    1. Death status (1 = dead, 0 = alive) - to use in censoring
-    2. Days to death (NA if alive)
-    3. Days to last followup (NA if dead)
-    4. Time to death OR last followup
-    5 - end. Data for each gene
+    1. Gender
+    2. Death status (1 = dead, 0 = alive) - to use in censoring
+    3. Days to death (NA if alive)
+    4. Days to last followup (NA if dead)
+    5. Time to death OR last followup
+    6 - end. Data for each gene
     '''
 
     os.chdir(str(CD + '/' + cohort))
@@ -117,17 +118,19 @@ def merge_clinical_with_mrna(cohort):
         clinical_vital_pos = clinical_header.index('vital_status')
         clinical_to_death_pos = clinical_header.index('days_to_death')
         clinical_last_followup = clinical_header.index('days_to_last_followup')
+        clinical_gender = clinical_header.index('gender')
 
         clinical_data = [line.rstrip().split('\t') for line in clinical_data]
         relevant_data = []
-        clinical_relevant_data_header = ['tcga_participant_barcode', 'death_status', 'days_to_death',
+        clinical_relevant_data_header = ['tcga_participant_barcode', 'gender', 'death_status', 'days_to_death',
                                          'days_to_last_followup', 'time_alive']
         relevant_data.append(clinical_relevant_data_header)
 
         # Extracting clinical data
         for sample in clinical_data:
-            barcode, vital, to_death, last_followup = sample[clinical_header_barcode_pos], sample[clinical_vital_pos], \
-                                                      sample[clinical_to_death_pos], sample[clinical_last_followup]
+            barcode, gender,  vital, to_death, last_followup = sample[clinical_header_barcode_pos], sample[clinical_gender], \
+                                                               sample[clinical_vital_pos], sample[clinical_to_death_pos], \
+                                                               sample[clinical_last_followup]
             if vital == 'alive':
                 time_alive = last_followup
                 vital = 0
@@ -136,7 +139,7 @@ def merge_clinical_with_mrna(cohort):
                 time_alive = to_death
                 vital = 1
 
-            lst = [barcode, vital, to_death, last_followup, time_alive]
+            lst = [barcode, gender, vital, to_death, last_followup, time_alive]
 
             relevant_data.append(lst)
 
@@ -180,12 +183,12 @@ def merge_clinical_with_mrna(cohort):
                 pass
             else:
                 # Remove entries that have wrong survival time data
-                if line[4] == 'NA' or int(line[4]) < 0:
+                if line[5] == 'NA' or int(line[5]) < 0:
                     relevant_data.pop(relevant_data.index(line))
                     print "Removed entry due to wrong lifespan data"
 
                 # For each column with gene data check if they are valid, if not - remove.
-                for i in range(len(relevant_data[0][5:])):
+                for i in range(len(relevant_data[0][6:])):
                     if line[i] == 'Not found':
                         relevant_data.pop(relevant_data.index(line))
                         print "Removed entry due to wrong RNASeq lifespan data"
@@ -208,7 +211,7 @@ def label_genes_with_quartiles(cohort):
 
     # Make labels for each quartile that will be added as last columns at the rightmost side
     clinical_labels = [i for i in data[0]]
-    gene_labels = [i + ' Quartile' for i in data[0][5:]]
+    gene_labels = [i + ' Quartile' for i in data[0][6:]]
 
     # Strip the line with labels
     data = data[1:]
@@ -227,7 +230,7 @@ def label_genes_with_quartiles(cohort):
     for gene in range(len(SEQUESTERED_GENES)):
         list_with_gene_expression_score = []
         for line in data:
-            list_with_gene_expression_score.append(line[gene+5])
+            list_with_gene_expression_score.append(line[gene+6])
 
         list_with_gene_expression_score = [float(i) for i in list_with_gene_expression_score]
         dict_key = SEQUESTERED_GENES[gene]
@@ -259,7 +262,7 @@ def label_genes_with_quartiles(cohort):
             genes_with_varying_expression.append(SEQUESTERED_GENES[gene])
 
     # Need to remove empty elements from the header
-    NEW_DATA_LIST[0] = NEW_DATA_LIST[0][:93]
+    NEW_DATA_LIST[0] = NEW_DATA_LIST[0][:94]
 
     print 'Changes in expression in: ' + str(genes_with_varying_expression)
     print 'No change in expression in: ' + str(genes_with_no_changes_in_expression)
@@ -272,44 +275,80 @@ def label_genes_with_quartiles(cohort):
         gene_index.append(NEW_DATA_LIST[0].index(i))
         gene_quartile_index.append(NEW_DATA_LIST[0].index(str(i + ' Quartile')))
 
-    print gene_index
-    print gene_quartile_index
     indexes_to_remove = gene_index + gene_quartile_index
 
     # Sorting the list in reverse order, so removing by index removes correct entries
     indexes_to_remove = sorted(indexes_to_remove, reverse=True)
-    print indexes_to_remove
     for i in indexes_to_remove:
         for line in NEW_DATA_LIST:
             line.pop(i)
 
-    for i in NEW_DATA_LIST[0:5]:
-        print i
+    count = 0
+    for i in NEW_DATA_LIST:
+        count += 1
+
+    print count
 
     # Exporting new data file
     with open(str('merged_data_with_quartiles_' + cohort), 'wb') as fp:
         pickle.dump(NEW_DATA_LIST, fp)
 
+
+
 def kaplan_meier_plot_and_stat(cohort):
 
     os.chdir(str(CD + '/' + cohort))
 
-    with open(str('merged_data_' + cohort), 'rb') as fp:
+    with open(str('merged_data_with_quartiles_' + cohort), 'rb') as fp:
         data = pickle.load(fp)
 
-    # Loading 1st row of list with data as header
+    # Loading as pandas DataFrame, 1st row will be header
     header = data[0]
     data = data[1:]
-    pandas_data = DataFrame(data=data, columns=header)
+    pandas_data = DataFrame(data=data, columns=header, dtype=float)
 
-    # Need to convert pd data series to numeric, because it is incorrectly recognized as object.
-    kaplan_meier_time = pd.to_numeric(pandas_data['time_alive'])
-    kaplan_meier_event = pandas_data['death_status']
-    fitter = lifelines.KaplanMeierFitter()
-    fitter.fit(kaplan_meier_time, event_observed=kaplan_meier_event)
-    fitter.plot()
-    plt.show()
+    # This is IT! That's how to easily group by 2 columns in pandas!
+    '''
+    grouped_data = pandas_data.groupby(['gender', 'Wdr65 Quartile'])
+    group = grouped_data.get_group(('female', 'Median'))
+    test_data = pd.to_numeric(group['time_alive'])
+    '''
 
+    def run_survival(data, gene_name):
+        gene = gene_name + ' Quartile'
+        gene = ''.join(gene)
+        genders = ['male', 'female']
+        print 'Running survival plot for ' + str(gene)
+        group_by = ['gender']
+        group_by.append(gene)
+        print group_by
+        gene_groups = ['Median', 'Third_quartile', 'Between_50_and_75']
+
+        ax = plt.subplot(111)
+        kmf = lifelines.KaplanMeierFitter()
+
+        grouped_data = data.groupby(group_by)
+
+        for gene_group in gene_groups:
+            for gender in genders:
+                pre_tuple_list = [gender, gene_group]
+                groups = tuple(pre_tuple_list)
+                print 'tuple: ' + str(groups)
+                d = grouped_data.get_group(groups)
+
+                kaplan_meier_time = pd.to_numeric(d['time_alive'])
+                kaplan_meier_event = d['death_status']
+
+                kmf.fit(kaplan_meier_time, kaplan_meier_event, label=groups)
+
+                kmf.plot(ax=ax)
+
+        plt.show()
+
+        return ax
+
+
+    run_survival(pandas_data, 'Wdr65')
 
 def process_data(cohort):
     get_clinical_data(cohort)
@@ -318,5 +357,7 @@ def process_data(cohort):
 
 
 merge_clinical_with_mrna('BRCA')
-#kaplan_meier_plot_and_stat('BRCA')
+
 label_genes_with_quartiles('BRCA')
+
+kaplan_meier_plot_and_stat('BRCA')
