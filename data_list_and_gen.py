@@ -4,6 +4,7 @@ import pickle
 from pandas import DataFrame
 import pandas as pd
 import lifelines
+from lifelines.statistics import pairwise_logrank_test, logrank_test, multivariate_logrank_test
 from matplotlib import pyplot as plt
 import numpy
 from math import sqrt, ceil
@@ -358,21 +359,33 @@ def kaplan_meier_plot_and_stat(cohort):
             for gender in genders:
                 try:
                     pre_tuple_list = [gender, gene_group]
-                    groups = tuple(pre_tuple_list)
-                    # print 'tuple: ' + str(groups)
-                    d = grouped_data.get_group(groups)
+                    group = tuple(pre_tuple_list)
+
+                    # print 'tuple: ' + str(group)
+                    d = grouped_data.get_group(group)
 
                     kaplan_meier_time = pd.to_numeric(d['time_alive'])
                     kaplan_meier_event = d['death_status']
 
-                    kmf.fit(kaplan_meier_time, kaplan_meier_event, label=groups)
+                    kmf.fit(kaplan_meier_time, kaplan_meier_event, label=group)
 
-                    kmf.plot(ax=ax)
+                    kmf.plot(ax=ax, show_censors=True, ci_show=False)
                 except KeyError:
                     # print "No " + str(gender) + ' in gene' + str(gene_group)
                     pass
 
+        event_durations = pandas_data.as_matrix(columns=['time_alive'])
 
+        pandas_data['stat_col'] = pandas_data[gene] + pandas_data['gender']
+        group_labels = pandas_data.as_matrix(columns=['stat_col'])
+
+        event = numpy.array(pandas_data.as_matrix(columns=['death_status']))
+
+        result = multivariate_logrank_test(event_durations, group_labels, event, 0.85)
+
+        print result.is_significant
+
+    changed_expression = changed_expression[0:2]
     for id, gene in enumerate(changed_expression):
         gene = str(gene)
         numb_of_plots = len(changed_expression)
