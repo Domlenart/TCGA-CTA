@@ -115,6 +115,7 @@ def check_mRNASeq_data(cohort):
     print 'No problems with mRNASeq in ' + str(cohort)
 
 
+# TODO: remove after new data piple is done
 def merge_clinical_with_mrna(cohort):
 
     ''' Order of data:
@@ -263,11 +264,12 @@ def merge_clinical_with_mrna_new(cohort):
         pandas_data = pandas_data.merge(gene_data, left_on='tcga_participant_barcode', right_on='tcga_participant_barcode')
 
     # Merging "days to death" with "..to last followup" and removing any rows where it still shows up as NA or 0
-    pandas_data["time"] = pandas_data.apply(lambda row: row["days_to_last_followup"] if row["days_to_death"] == 'NA' else row["days_to_death"], axis=1)
-
+    pandas_data['time'] = pandas_data.apply(lambda row: row["days_to_last_followup"] if row["days_to_death"] == 'NA' else row["days_to_death"], axis=1)
+    pandas_data['death_status'] = pandas_data.apply(lambda row: 0 if row['vital_status'] == 'alive' else 1, axis=1)
     pandas_data = pandas_data[pandas_data.time != 'NA']
     pandas_data = pandas_data[pandas_data.time > 0]
 
+    # TODO: Change output file name when quartile labeling is done
     os.chdir(str(CD + '/' + cohort))
     pandas_data.to_csv('test')
 
@@ -360,7 +362,15 @@ def label_genes_with_quartiles(cohort):
         pickle.dump(NEW_DATA_LIST, fp)
 
 
+def label_genes_with_quartiles_new(cohort):
+    # TODO: Use pandas
+    pass
+
+
 def kaplan_meier_plot_and_stat(cohort):
+
+    # TODO: Add p value onto plots.
+    # TODO: Add another version of logrank test to compare between each group instead of ANOVA
 
     os.chdir(str(CD + '/' + cohort))
     with open(str('merged_data_with_quartiles_' + cohort), 'rb') as fp:
