@@ -127,8 +127,6 @@ def merge_clinical_with_mrna(cohort):
     6 - end. Data for each gene
     '''
 
-    #TODO: Rewrite with Pandas instead of python lists
-
     os.chdir(str(CD + '/' + cohort))
     if not os.path.isfile(str(CD + '/' + cohort + '/' + 'merged_data_' + cohort)):
 
@@ -241,6 +239,37 @@ def merge_clinical_with_mrna(cohort):
 
     else:
         pass
+
+
+def merge_clinical_with_mrna_new(cohort):
+    os.chdir(str(CD + '/' + cohort))
+
+    with open(str(cohort + '_clinical.txt')) as clinical_file:
+        clinical_header = clinical_file.readline().rstrip().split('\t')
+        clinical_data = [line.rstrip().split('\t') for line in clinical_file]
+
+    pandas_data = pd.DataFrame.from_records(clinical_data, columns=clinical_header)
+
+    os.chdir(str(CD + '/' + cohort + '/Gene_data_RAW'))
+
+    for i in SEQUESTERED_GENES:
+        with open(str(cohort + '_' + i.upper() + '_mRNASeq_RAW.txt')) as gene_file:
+            gene_header = gene_file.readline().rstrip().split('\t')
+            gene_data = [line.rstrip().split('\t') for line in gene_file]
+            gene_data = pd.DataFrame.from_records(gene_data, columns=gene_header)
+            gene_data = gene_data[['tcga_participant_barcode', 'z-score']]
+            gene_data.rename(columns={'z-score': i}, inplace=True)
+
+        pandas_data = pandas_data.merge(gene_data, left_on='tcga_participant_barcode', right_on='tcga_participant_barcode')
+
+    # Merging "days to death" with "..to last followup" and removing any rows where it still shows up as NA or 0
+    pandas_data["time"] = pandas_data.apply(lambda row: row["days_to_last_followup"] if row["days_to_death"] == 'NA' else row["days_to_death"], axis=1)
+
+    pandas_data = pandas_data[pandas_data.time != 'NA']
+    pandas_data = pandas_data[pandas_data.time > 0]
+
+    os.chdir(str(CD + '/' + cohort))
+    pandas_data.to_csv('test')
 
 
 def label_genes_with_quartiles(cohort):
@@ -430,7 +459,6 @@ def process_data(cohort):
     print "-" * 45
 
 
-for i in LIST_OF_CANCERS:
-    process_data(i)
+merge_clinical_with_mrna_new('ACC')
 
 
