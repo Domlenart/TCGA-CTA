@@ -4,10 +4,11 @@ import pickle
 from pandas import DataFrame
 import pandas as pd
 import lifelines
-from lifelines.statistics import pairwise_logrank_test, logrank_test, multivariate_logrank_test
+from lifelines.statistics import multivariate_logrank_test
 from matplotlib import pyplot as plt
 import numpy
 from math import sqrt, ceil
+import csv
 
 CD = os.path.dirname(os.path.abspath(__file__))
 SEQUESTERED_GENES = [i.rstrip() for i in open('pure-sequestered-cta')]
@@ -15,9 +16,9 @@ LIST_OF_CANCERS = ['ACC', 'BLCA', 'BRCA', 'CESC', 'CHOL', 'COAD', 'COADREAD', 'D
                    'KICH', 'KIPAN', 'KIRC', 'KIRP', 'LAML', 'LGG', 'LIHC', 'LUAD', 'LUSC', 'MESO', 'OV', 'PAAD', 'PCPG',
                    'PRAD', 'READ', 'SARC', 'SKCM', 'STAD', 'STES', 'TGCT', 'THCA', 'THYM', 'UCEC', 'UCS', 'UVM']
 
-print 'List of cancers that will be analyzed: ' + str(LIST_OF_CANCERS)
-print 'List of genes to be analyzed: ' + str(SEQUESTERED_GENES)
-print 'Current script working directory: ' + str(CD)
+#print 'List of cancers that will be analyzed: ' + str(LIST_OF_CANCERS)
+#print 'List of genes to be analyzed: ' + str(SEQUESTERED_GENES)
+print 'Script directory: ' + str(CD)
 
 
 def find_two_closest_integers(X):
@@ -37,6 +38,7 @@ def find_two_closest_integers(X):
 
 
 def get_clinical_data(cohort):
+    os.chdir(CD)
     if not os.path.exists(cohort):
         os.makedirs(cohort)
         working_directory = CD + '/' + cohort
@@ -125,6 +127,8 @@ def merge_clinical_with_mrna(cohort):
     6 - end. Data for each gene
     '''
 
+    #TODO: Rewrite with Pandas instead of python lists
+
     os.chdir(str(CD + '/' + cohort))
     if not os.path.isfile(str(CD + '/' + cohort + '/' + 'merged_data_' + cohort)):
 
@@ -181,16 +185,19 @@ def merge_clinical_with_mrna(cohort):
 
             for line in gene_data:
                 id += 1
-                if line[0] == relevant_data[id][0]:
-                    z_score = line[gene_data_z_score_pos]
-                    relevant_data[id].append(z_score)
+                # If Barcodes match then append Z score
+                try:
+                    if line[0] == relevant_data[id][0]:
+                        z_score = line[gene_data_z_score_pos]
+                        relevant_data[id].append(z_score)
 
-                else:
-                    relevant_data[id].append('Not found')
-                    z_score = line[gene_data_z_score_pos]
-                    id += 1
-                    relevant_data[id].append(z_score)
-
+                    else:
+                        relevant_data[id].append('Not found')
+                        z_score = line[gene_data_z_score_pos]
+                        id += 1
+                        relevant_data[id].append(z_score)
+                except IndexError:
+                    pass
         os.chdir(str(CD + '/' + cohort))
 
         # Removing patients that have wrong survival data or no rnaseq from file
@@ -201,19 +208,34 @@ def merge_clinical_with_mrna(cohort):
                 pass
             else:
                 # Remove entries that have wrong survival time data
-                if line[5] == 'NA' or int(line[5]) < 0:
+                if line[5] == 'NA' or int(line[5]) < 0 or int(line[5]) == 0:
                     relevant_data.pop(relevant_data.index(line))
                     print "Removed entry due to wrong lifespan data"
 
-                # For each column with gene data check if they are valid, if not - remove.
-                for i in range(len(relevant_data[0][6:])):
-                    if line[i] == 'Not found':
+                else:
+                    # For each column with gene data check if they are valid, if not - remove.
+                    try:
+                        for i in range(len(relevant_data[0][6:])):
+                            if line[i] == 'Not found':
+                                relevant_data.pop(relevant_data.index(line))
+                                print "Removed entry due to wrong RNASeq data"
+                                break
+                            else:
+                                pass
+                    except IndexError:
+                        print "Weird indexing problem occured, removing sample"
                         relevant_data.pop(relevant_data.index(line))
-                        print "Removed entry due to wrong RNASeq lifespan data"
-                        break
-                    else:
-                        pass
+
+        # Temporary solution for LUAD data bug:
+
+        if cohort == "LUAD":
+            print "running fix for LUAD DATA"
+            relevant_data.pop(1)
+
         # Dumping a list with relevant data to file
+        with open('merged_data', 'wb') as ff:
+            writer = csv.writer(ff)
+            writer.writerows(relevant_data)
         with open(str('merged_data_' + cohort), 'wb') as fp:
             pickle.dump(relevant_data, fp)
 
@@ -233,12 +255,10 @@ def label_genes_with_quartiles(cohort):
 
     # Strip the line with labels
     data = data[1:]
-
-    # Determine quartiles (25, 75) for each gene expression. Apply quartiles to main data structure
+    # Determine quartiles for each gene expression. Apply quartiles to main data structure
 
     genes_with_varying_expression = []
     genes_with_no_changes_in_expression = []
-    dict_gene_name_expression_list = {}
 
     NEW_DATA_LIST = [clinical_labels + gene_labels] + data
     to_append_each_line = ['' for i in range(len(SEQUESTERED_GENES))]
@@ -252,11 +272,12 @@ def label_genes_with_quartiles(cohort):
 
         list_with_gene_expression_score = [float(i) for i in list_with_gene_expression_score]
         dict_key = SEQUESTERED_GENES[gene]
-        dict_gene_name_expression_list[dict_key] = list_with_gene_expression_score
 
         numpy_array = numpy.array(list_with_gene_expression_score)
         percentile_50 = numpy.percentile(numpy_array, 50)
+        # print str("Percentile 50 for " + str(dict_key) + "is equal to: " + str(percentile_50))
         percentile_75 = numpy.percentile(numpy_array, 75)
+        # print str("Percentile 75 for " + str(dict_key) + "is equal to: " + str(percentile_75))
 
         list_of_quartile_determination = []
         index_of_column_to_edit = NEW_DATA_LIST[0].index(str(dict_key) + ' Quartile')
@@ -275,19 +296,19 @@ def label_genes_with_quartiles(cohort):
 
         if percentile_50 == percentile_75:
             genes_with_no_changes_in_expression.append(SEQUESTERED_GENES[gene])
-
         else:
             genes_with_varying_expression.append(SEQUESTERED_GENES[gene])
 
-    # Need to remove empty elements from the header
-    NEW_DATA_LIST[0] = NEW_DATA_LIST[0][:94]
+    # Need to remove empty elements from the header.
+    length_of_first_row = len(NEW_DATA_LIST[1])
+    NEW_DATA_LIST[0] = NEW_DATA_LIST[0][:length_of_first_row]
 
-    print 'Changes in expression in: ' + str(len(genes_with_varying_expression)) + str(genes_with_varying_expression)
+    print 'Changes in expression in: ' + str(len(genes_with_varying_expression)) + ' :' + str(genes_with_varying_expression)
 
     with open('Genes_with_changed_expression', 'wb') as f:
         pickle.dump(genes_with_varying_expression, f)
 
-    print 'No change in expression in: ' + str(genes_with_no_changes_in_expression)
+    print 'No change in expression in: ' + str(len(genes_with_no_changes_in_expression)) + ' :' + str(genes_with_no_changes_in_expression)
 
     # Time to remove data for genes that do not change their expression
     gene_index = []
@@ -304,12 +325,6 @@ def label_genes_with_quartiles(cohort):
     for i in indexes_to_remove:
         for line in NEW_DATA_LIST:
             line.pop(i)
-
-    count = 0
-    for i in NEW_DATA_LIST:
-        count += 1
-
-    print count
 
     # Exporting new data file
     with open(str('merged_data_with_quartiles_' + cohort), 'wb') as fp:
@@ -329,6 +344,11 @@ def kaplan_meier_plot_and_stat(cohort):
     data = data[1:]
     pandas_data = DataFrame(data=data, columns=header, dtype=float)
 
+    try:
+        pandas_data = pandas_data.drop(pandas_data[pandas_data.time_alive == 'NA'].index)
+    except TypeError:
+        pass
+
     # This is IT! That's how to easily group by 2 columns in pandas!
     '''
     grouped_data = pandas_data.groupby(['gender', 'Wdr65 Quartile'])
@@ -336,16 +356,13 @@ def kaplan_meier_plot_and_stat(cohort):
     test_data = pd.to_numeric(group['time_alive'])
     '''
 
-    def run_survival(data, gene_name, number_of_plots, plot_id):
-        plot_size = find_two_closest_integers(int(number_of_plots))
-        plot_id = plot_id+1
-        ax = plt.subplot(int(plot_size[0]), int(plot_size[1]), plot_id)
-        ax.set_title(gene_name)
+    def run_survival(data, gene_name):
+        ay = plt.subplot(111)
+        ay.set_title(gene_name)
 
         gene = gene_name + ' Quartile'
         gene = ''.join(gene)
         genders = ['male', 'female']
-        print 'Running survival plot for ' + str(gene)
         group_by = ['gender']
         group_by.append(gene)
         # print group_by
@@ -363,13 +380,12 @@ def kaplan_meier_plot_and_stat(cohort):
 
                     # print 'tuple: ' + str(group)
                     d = grouped_data.get_group(group)
-
                     kaplan_meier_time = pd.to_numeric(d['time_alive'])
                     kaplan_meier_event = d['death_status']
 
                     kmf.fit(kaplan_meier_time, kaplan_meier_event, label=group)
 
-                    kmf.plot(ax=ax, show_censors=True, ci_show=False)
+                    kmf.plot(ax=ay, show_censors=False, ci_show=False)
                 except KeyError:
                     # print "No " + str(gender) + ' in gene' + str(gene_group)
                     pass
@@ -383,26 +399,38 @@ def kaplan_meier_plot_and_stat(cohort):
 
         result = multivariate_logrank_test(event_durations, group_labels, event, 0.85)
 
-        print result.is_significant
+        os.chdir(str(CD + '/' + cohort))
+        if not os.path.exists(CD + '/' + cohort + '/results'):
+            os.makedirs('results')
+        os.chdir(str(CD + '/' + cohort + '/results'))
 
-    changed_expression = changed_expression[0:2]
-    for id, gene in enumerate(changed_expression):
+        plt.legend(bbox_to_anchor=(1.05, 1), loc=2, borderaxespad=0)
+        plt.savefig(str(gene_name + '_' + str(result.is_significant) + '.png'), bbox_inches='tight')
+
+        f.close()
+        plt.close()
+
+    for gene in changed_expression:
         gene = str(gene)
-        numb_of_plots = len(changed_expression)
-        run_survival(pandas_data, gene, numb_of_plots,id)
-
-    plt.show()
+        run_survival(pandas_data, gene)
 
 
 def process_data(cohort):
+    print "Processing data for: " + cohort
     get_clinical_data(cohort)
+    print "Clinical data downloaded"
     get_mRNASeq_data(cohort)
+    print "mRNASeq data downloaded"
     check_mRNASeq_data(cohort)
+    merge_clinical_with_mrna(cohort)
+    print "Files merged"
+    label_genes_with_quartiles(cohort)
+    print "Quartiles determined. Plotting."
+    kaplan_meier_plot_and_stat(cohort)
+    print "-" * 45
 
 
-merge_clinical_with_mrna('BRCA')
+for i in LIST_OF_CANCERS:
+    process_data(i)
 
-label_genes_with_quartiles('BRCA')
-
-kaplan_meier_plot_and_stat('BRCA')
 
